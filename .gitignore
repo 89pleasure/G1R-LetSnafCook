@@ -1,0 +1,16 @@
+# Local build/package output
+dist/
+*.zip
+
+# UE4SS/runtime noise
+UE4SS.log
+UE4SS_ObjectDump.txt
+IndividualObjectDumps/
+liveview/
+watches/
+
+# Editor/OS files
+.vs/
+.vscode/
+Thumbs.db
+Desktop.ini
