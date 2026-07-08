@@ -21,7 +21,7 @@ This UE4SS Lua mod upgrades Snaf's daily reward after you complete his Syra reci
 
 ## Installation
 
-Copy `Mods/LetSnafCook` into your UE4SS `Mods` directory:
+Copy `package/LetSnafCook` into your UE4SS `Mods` directory:
 
 ```text
 G1R/Binaries/Win64/ue4ss/Mods/
