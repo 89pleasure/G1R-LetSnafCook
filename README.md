@@ -12,13 +12,23 @@ This UE4SS Lua mod upgrades Snaf's daily reward as his recipe quests progress. A
 - Upgrade 1: replaces the reward with 3x Brock's Stew after The Forgotten Recipe
 - Upgrade 2: replaces the reward with 3x Syra's Stew after completing the Syra recipe quest
 - Configurable upgraded reward mixes, such as 1x Syra's Stew and 2x Brock's Stew
+- Optional in-game configuration through SharedModMenu
 - Works with existing savegames
 - Lightweight UE4SS Lua mod
 - No new items, just a small configurable reward progression fix
 
 ## Configuration
 
-Edit `LetSnafCook.ini` in the mod folder to change the upgraded rewards:
+If SharedModMenu is installed, open it in game and use the `Let Snaf Cook` tab.
+Each upgrade has three portion slots:
+
+- `1` = Meatbug Ragout
+- `2` = Brock's Stew
+- `3` = Syra's Stew
+
+Changes made in SharedModMenu are saved to `LetSnafCook.ini`.
+
+You can also edit `LetSnafCook.ini` in the mod folder directly:
 
 ```ini
 Upgrade1=meatbug,brock,brock
@@ -41,6 +51,7 @@ The mod still checks quest progress. If a configured portion is not unlocked, it
 
 - Gothic 1 Remake
 - UE4SS
+- Optional: SharedModMenu for in-game configuration
 
 ## Installation
 
@@ -54,6 +65,7 @@ The final installed paths should look like this:
 
 ```text
 G1R/Binaries/Win64/ue4ss/Mods/LetSnafCook/Scripts/main.lua
+G1R/Binaries/Win64/ue4ss/Mods/LetSnafCook/Scripts/modmenu.lua
 G1R/Binaries/Win64/ue4ss/Mods/LetSnafCook/LetSnafCook.ini
 ```
 

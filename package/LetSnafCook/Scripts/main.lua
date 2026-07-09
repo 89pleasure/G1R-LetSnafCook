@@ -9,6 +9,12 @@ local SYRA_QUEST_WAIT_SNAF = "/Script/Angelscript.Quest_OldCamp_OCCHAPTER2_SYRAR
 local SNAF_AFTERSUCCESS = "ChoiceSnafAftersuccess"
 local PENDING_SECONDS = 25
 local CONFIG_FILE_NAME = "LetSnafCook.ini"
+local FOOD_KEYS = { "meatbug", "brock", "syra" }
+local FOOD_CODES = {
+    meatbug = 1,
+    brock = 2,
+    syra = 3,
+}
 local DEFAULT_CONFIG = {
     Upgrade1 = { "brock", "brock", "brock" },
     Upgrade2 = { "syra", "syra", "syra" },
@@ -22,6 +28,8 @@ local swapping_inventory = false
 local object_cache = {}
 local live_instance_cache = {}
 local config_cache = nil
+local config_file_path = nil
+local shared_mod_menu = nil
 
 local function log(message)
     print("[" .. MOD .. "] " .. tostring(message) .. "\n")
@@ -80,6 +88,20 @@ local function read_text_file(path)
     local content = file:read("*a")
     file:close()
     return content
+end
+
+local function write_text_file(path, content)
+    local file = try(function()
+        if type(io) ~= "table" or type(io.open) ~= "function" then return nil end
+        return io.open(path, "w")
+    end)
+    if not file then
+        return false
+    end
+
+    file:write(content)
+    file:close()
+    return true
 end
 
 local function config_candidate_paths()
@@ -168,6 +190,21 @@ local function parse_upgrade(name, value)
         return nil
     end
     return upgrade
+end
+
+local function copy_upgrade(upgrade)
+    local copy = {}
+    for i, key in ipairs(upgrade or {}) do
+        copy[i] = key
+    end
+    return copy
+end
+
+local function default_config_copy()
+    return {
+        Upgrade1 = copy_upgrade(DEFAULT_CONFIG.Upgrade1),
+        Upgrade2 = copy_upgrade(DEFAULT_CONFIG.Upgrade2),
+    }
 end
 
 local function config_from_ini(ini)
@@ -378,7 +415,7 @@ end
 local function load_config()
     if config_cache ~= nil then return config_cache end
 
-    config_cache = DEFAULT_CONFIG
+    config_cache = default_config_copy()
     local loaded_config = false
     local function upgrade_text(upgrade)
         if type(upgrade) ~= "table" then return "<invalid>" end
@@ -389,6 +426,7 @@ local function load_config()
         local content = read_text_file(path)
         if content then
             config_cache = config_from_ini(parse_ini(content))
+            config_file_path = path
             loaded_config = true
             log("Loaded config from " .. path
                 .. ": Upgrade1=" .. upgrade_text(config_cache.Upgrade1)
@@ -400,6 +438,156 @@ local function load_config()
         log("Config not found; using defaults.")
     end
     return config_cache
+end
+
+local function upgrade_text(upgrade)
+    if type(upgrade) ~= "table" then return nil end
+    return table.concat(upgrade, ",")
+end
+
+local function writable_config_path()
+    if config_file_path ~= nil then return config_file_path end
+    local paths = config_candidate_paths()
+    config_file_path = paths[1] or CONFIG_FILE_NAME
+    return config_file_path
+end
+
+local function config_file_content(config)
+    return table.concat({
+        "; Let Snaf Cook",
+        "; Snaf starts with his original Meatbug Ragout reward.",
+        ";",
+        "; Upgrade1 is active after The Forgotten Recipe unlocks Brock's Stew.",
+        "; Upgrade2 is active after Snaf's Syra recipe quest unlocks Syra's Stew.",
+        ";",
+        "; Each upgrade must contain exactly 3 portions.",
+        "; Separators: comma or dot",
+        "; Allowed values: meatbug/meat, brock, syra",
+        ";",
+        "; SharedModMenu shows each portion as a number:",
+        "; 1 = meatbug, 2 = brock, 3 = syra",
+        "",
+        "Upgrade1=" .. (upgrade_text(config.Upgrade1) or upgrade_text(DEFAULT_CONFIG.Upgrade1)),
+        "Upgrade2=" .. (upgrade_text(config.Upgrade2) or upgrade_text(DEFAULT_CONFIG.Upgrade2)),
+        "",
+    }, "\n")
+end
+
+local function save_config()
+    local config = load_config()
+    local path = writable_config_path()
+    if write_text_file(path, config_file_content(config)) then
+        log("Saved config to " .. path
+            .. ": Upgrade1=" .. tostring(upgrade_text(config.Upgrade1))
+            .. " Upgrade2=" .. tostring(upgrade_text(config.Upgrade2)))
+        return true
+    end
+
+    log("Could not save config to " .. tostring(path))
+    return false
+end
+
+local function menu_upgrade(stage_name)
+    local config = load_config()
+    if type(config[stage_name]) ~= "table" then
+        config[stage_name] = copy_upgrade(DEFAULT_CONFIG[stage_name])
+    end
+    return config[stage_name]
+end
+
+local function menu_food_code(stage_name, index)
+    local key = menu_upgrade(stage_name)[index]
+    return FOOD_CODES[key] or FOOD_CODES.meatbug
+end
+
+local function menu_set_food_code(stage_name, index, value)
+    local code = math.floor((tonumber(value) or 1) + 0.5)
+    if code < 1 then code = 1 end
+    if code > #FOOD_KEYS then code = #FOOD_KEYS end
+
+    menu_upgrade(stage_name)[index] = FOOD_KEYS[code]
+    log("SharedModMenu set " .. stage_name .. " portion " .. tostring(index)
+        .. " to " .. tostring(FOOD_KEYS[code]))
+    save_config()
+end
+
+local function reset_stage_config(stage_name)
+    load_config()[stage_name] = copy_upgrade(DEFAULT_CONFIG[stage_name])
+    save_config()
+    if shared_mod_menu and type(shared_mod_menu.requestRefresh) == "function" then
+        shared_mod_menu.requestRefresh()
+    end
+end
+
+local function menu_slot(stage_name, index)
+    local display_stage = string.gsub(stage_name, "Upgrade", "Upgrade ")
+    local slot_stage = stage_name
+    local slot_index = index
+    return {
+        name = display_stage .. " Portion " .. tostring(slot_index),
+        kind = "num",
+        min = 1,
+        max = #FOOD_KEYS,
+        step = 1,
+        desc = "1 Meatbug, 2 Brock, 3 Syra",
+        get = function()
+            return menu_food_code(slot_stage, slot_index)
+        end,
+        set = function(value)
+            menu_set_food_code(slot_stage, slot_index, value)
+        end,
+    }
+end
+
+local function register_shared_mod_menu()
+    local dir = script_directory()
+    if dir then
+        package.path = dir .. "?.lua;" .. package.path
+    end
+    package.loaded["modmenu"] = nil
+
+    local ok, modmenu = pcall(require, "modmenu")
+    if not ok or type(modmenu) ~= "table" or type(modmenu.register) ~= "function" then
+        log("SharedModMenu bridge unavailable: " .. tostring(modmenu))
+        return
+    end
+    shared_mod_menu = modmenu
+
+    modmenu.register("Let Snaf Cook", {
+        {
+            title = "Upgrade 1",
+            items = {
+                menu_slot("Upgrade1", 1),
+                menu_slot("Upgrade1", 2),
+                menu_slot("Upgrade1", 3),
+                {
+                    name = "Reset Upgrade 1",
+                    kind = "action",
+                    desc = "Default: 3x Brock",
+                    set = function()
+                        reset_stage_config("Upgrade1")
+                    end,
+                },
+            },
+        },
+        {
+            title = "Upgrade 2",
+            items = {
+                menu_slot("Upgrade2", 1),
+                menu_slot("Upgrade2", 2),
+                menu_slot("Upgrade2", 3),
+                {
+                    name = "Reset Upgrade 2",
+                    kind = "action",
+                    desc = "Default: 3x Syra",
+                    set = function()
+                        reset_stage_config("Upgrade2")
+                    end,
+                },
+            },
+        },
+    })
+    log("Registered SharedModMenu integration.")
 end
 
 local function lower_available_food_for_stage(stage_name, brock_done)
@@ -646,6 +834,7 @@ local function register_hook(path, handler)
 end
 
 load_config()
+register_shared_mod_menu()
 
 register_hook("/Script/G1R.GameplayAbilityConversationV2WithUI:ServerRequestStartActingTopic",
     function(context, topic)
