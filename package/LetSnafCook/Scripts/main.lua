@@ -1,19 +1,27 @@
 local MOD = "LetSnafCook"
 
 local MEATBUG_RAGOUT = "/Script/Angelscript.ItFo_Meatbugragout"
+local BROCK_STEW = "/Script/Angelscript.ItFo_Ottostew"
 local SYRA_STEW = "/Script/Angelscript.ItFo_SyraRecipe"
-local SYRA_STEW_DEFAULT = "/Script/Angelscript.Default__ItFo_SyraRecipe"
+local BROCK_QUEST_MAIN = "/Script/Angelscript.Quest_OldCamp_OCCHAPTER1_FORGOTEN_RECIPE"
 local SYRA_QUEST_MAIN = "/Script/Angelscript.Quest_OldCamp_OCCHAPTER2_SYRARECIPE"
 local SYRA_QUEST_WAIT_SNAF = "/Script/Angelscript.Quest_OldCamp_OCCHAPTER2_SYRARECIPE_SYRARECIPE_OBJ_WAITSNAF"
 local SNAF_AFTERSUCCESS = "ChoiceSnafAftersuccess"
 local PENDING_SECONDS = 25
+local CONFIG_FILE_NAME = "LetSnafCook.ini"
+local DEFAULT_CONFIG = {
+    Upgrade1 = { "brock", "brock", "brock" },
+    Upgrade2 = { "syra", "syra", "syra" },
+}
 
 local pending_snaf_reward = false
-local pending_syra_unlocked = false
+local pending_reward_mix = nil
 local pending_since = 0
+local suppress_original_reward_hud_until = 0
 local swapping_inventory = false
-local suppress_next_syra_hud = 0
 local object_cache = {}
+local live_instance_cache = {}
+local config_cache = nil
 
 local function log(message)
     print("[" .. MOD .. "] " .. tostring(message) .. "\n")
@@ -32,6 +40,142 @@ local function try(fn)
     local ok, result = pcall(fn)
     if ok then return result end
     return nil
+end
+
+local function trim(value)
+    return tostring(value or ""):match("^%s*(.-)%s*$")
+end
+
+local function upper(value)
+    return string.upper(trim(value))
+end
+
+local function script_directory()
+    local info = try(function()
+        if type(debug) ~= "table" or type(debug.getinfo) ~= "function" then
+            return nil
+        end
+        return debug.getinfo(1, "S")
+    end)
+    if not info or not info.source then
+        return nil
+    end
+
+    local source = tostring(info.source)
+    if source:sub(1, 1) == "@" then
+        source = source:sub(2)
+    end
+    return source:match("^(.*[\\/])[^\\/]*$")
+end
+
+local function read_text_file(path)
+    local file = try(function()
+        if type(io) ~= "table" or type(io.open) ~= "function" then return nil end
+        return io.open(path, "r")
+    end)
+    if not file then
+        return nil
+    end
+
+    local content = file:read("*a")
+    file:close()
+    return content
+end
+
+local function config_candidate_paths()
+    local paths = {}
+    local dir = script_directory()
+    if dir then
+        table.insert(paths, dir .. "..\\" .. CONFIG_FILE_NAME)
+        table.insert(paths, dir .. CONFIG_FILE_NAME)
+    end
+    table.insert(paths, "Mods\\LetSnafCook\\" .. CONFIG_FILE_NAME)
+    table.insert(paths, "ue4ss\\Mods\\LetSnafCook\\" .. CONFIG_FILE_NAME)
+    table.insert(paths, CONFIG_FILE_NAME)
+    return paths
+end
+
+local function parse_ini(content)
+    local result = {}
+    for line in string.gmatch(tostring(content or ""), "[^\r\n]+") do
+        local stripped = trim(line)
+        if stripped ~= "" and stripped:sub(1, 1) ~= ";"
+            and stripped:sub(1, 1) ~= "#"
+            and stripped:sub(1, 1) ~= "["
+        then
+            local key, value = stripped:match("^([%w_%.%-]+)%s*=%s*(.-)%s*$")
+            if key and value then
+                result[upper(key)] = trim(value)
+            end
+        end
+    end
+    return result
+end
+
+local function normalize_food_token(value)
+    local token = upper(value)
+    token = string.gsub(token, "[%s_%-']", "")
+    if token == "BROCK" or token == "BROCKS"
+        or token == "BROCKSTEW" or token == "BROCKSSTEW"
+        or token == "BROCKEINTOPF" or token == "BROCKSEINTOPF"
+    then
+        return "brock"
+    end
+    if token == "SYRA" or token == "SYRAS"
+        or token == "SYRASTEW" or token == "SYRASSTEW"
+        or token == "SYRAEINTOPF" or token == "SYRASEINTOPF"
+    then
+        return "syra"
+    end
+    if token == "MEAT" or token == "MEATBUG" or token == "MEATBUGS"
+        or token == "MEATBUGRAGOUT"
+        or token == "FLEISCHWANZE" or token == "FLEISCHWANZEN"
+        or token == "FLEISCHWANZENRAGOUT"
+    then
+        return "meatbug"
+    end
+    return nil
+end
+
+local function food_label(key)
+    if key == "meatbug" then return "Meatbug Ragout" end
+    if key == "brock" then return "Brock's Stew" end
+    if key == "syra" then return "Syra's Stew" end
+    return tostring(key)
+end
+
+local function parse_upgrade(name, value)
+    local text = trim(value)
+    if text == "" then
+        log(name .. " missing in config; using lower available food.")
+        return nil
+    end
+
+    local upgrade = {}
+    for part in string.gmatch(text, "([^,%.]+)") do
+        local token = normalize_food_token(part)
+        if token == nil then
+            log(name .. " has invalid food entry '" .. trim(part)
+                .. "'; using lower available food.")
+            return nil
+        end
+        table.insert(upgrade, token)
+    end
+
+    if #upgrade ~= 3 then
+        log(name .. " must contain exactly 3 portions but has "
+            .. tostring(#upgrade) .. "; using lower available food.")
+        return nil
+    end
+    return upgrade
+end
+
+local function config_from_ini(ini)
+    ini = ini or {}
+    return {
+        Upgrade1 = parse_upgrade("Upgrade1", ini.UPGRADE1),
+        Upgrade2 = parse_upgrade("Upgrade2", ini.UPGRADE2),
+    }
 end
 
 local function is_valid(obj)
@@ -117,6 +261,9 @@ local function not_default_object(obj)
 end
 
 local function find_live_instance(class_name)
+    local cached = live_instance_cache[class_name]
+    if cached ~= nil and is_valid(cached) then return cached end
+
     local list = try(function()
         if type(FindAllOf) == "function" then return FindAllOf(class_name) end
         return nil
@@ -127,6 +274,7 @@ local function find_live_instance(class_name)
     for _, obj in ipairs(list) do
         if not_default_object(obj) then
             if string.find(full_name(obj), ".Instance_", 1, true) ~= nil then
+                live_instance_cache[class_name] = obj
                 return obj
             end
             fallback = fallback or obj
@@ -134,6 +282,7 @@ local function find_live_instance(class_name)
     end
 
     if is_valid(fallback) then
+        live_instance_cache[class_name] = fallback
         return fallback
     end
     return nil
@@ -145,10 +294,6 @@ end
 
 local function is_meatbug_ragout(item_param)
     return name_contains(unwrap(item_param), "ItFo_Meatbugragout")
-end
-
-local function is_syra_stew(item_param)
-    return name_contains(unwrap(item_param), "ItFo_SyraRecipe")
 end
 
 local function quest_subsystem()
@@ -226,25 +371,175 @@ local function syra_quest_done()
         or quest_succeeded_by_path(SYRA_QUEST_WAIT_SNAF)
 end
 
+local function brock_quest_done()
+    return quest_succeeded_by_path(BROCK_QUEST_MAIN)
+end
+
+local function load_config()
+    if config_cache ~= nil then return config_cache end
+
+    config_cache = DEFAULT_CONFIG
+    local loaded_config = false
+    local function upgrade_text(upgrade)
+        if type(upgrade) ~= "table" then return "<invalid>" end
+        return table.concat(upgrade, ",")
+    end
+
+    for _, path in ipairs(config_candidate_paths()) do
+        local content = read_text_file(path)
+        if content then
+            config_cache = config_from_ini(parse_ini(content))
+            loaded_config = true
+            log("Loaded config from " .. path
+                .. ": Upgrade1=" .. upgrade_text(config_cache.Upgrade1)
+                .. " Upgrade2=" .. upgrade_text(config_cache.Upgrade2))
+            break
+        end
+    end
+    if not loaded_config then
+        log("Config not found; using defaults.")
+    end
+    return config_cache
+end
+
+local function lower_available_food_for_stage(stage_name, brock_done)
+    if stage_name == "Upgrade2" and brock_done then
+        return "brock"
+    end
+    return "meatbug"
+end
+
+local function lower_available_upgrade(stage_name, brock_done)
+    local key = lower_available_food_for_stage(stage_name, brock_done)
+    return { key, key, key }
+end
+
+local function recipe_unlocked(key, brock_done, syra_done)
+    if key == "meatbug" then return true end
+    if key == "brock" then return brock_done end
+    if key == "syra" then return syra_done end
+    return false
+end
+
+local function lower_available_food_for_request(key, brock_done)
+    if key == "syra" and brock_done then
+        return "brock"
+    end
+    return "meatbug"
+end
+
+local function recipe_path(key)
+    if key == "meatbug" then return MEATBUG_RAGOUT end
+    if key == "brock" then return BROCK_STEW end
+    if key == "syra" then return SYRA_STEW end
+    return nil
+end
+
+local function append_reward(mix, key, count)
+    local path = recipe_path(key)
+    if path == nil or count <= 0 then return end
+    table.insert(mix, {
+        key = key,
+        path = path,
+        count = count,
+    })
+end
+
+local function upgrade_contains(stage_config, key)
+    for _, configured_key in ipairs(stage_config or {}) do
+        if configured_key == key then return true end
+    end
+    return false
+end
+
+local function configured_reward_mix()
+    local syra_done = syra_quest_done()
+    local stage_name = nil
+    local stage_config = nil
+    local brock_done = false
+
+    if syra_done then
+        stage_name = "Upgrade2"
+        stage_config = load_config()[stage_name]
+        if stage_config == nil then
+            brock_done = brock_quest_done()
+            stage_config = lower_available_upgrade(stage_name, brock_done)
+            log(stage_name .. " config is invalid; using "
+                .. table.concat(stage_config, ",") .. ".")
+        elseif upgrade_contains(stage_config, "brock") then
+            brock_done = brock_quest_done()
+        end
+    else
+        brock_done = brock_quest_done()
+        if not brock_done then return nil end
+
+        stage_name = "Upgrade1"
+        stage_config = load_config()[stage_name]
+        if stage_config == nil then
+            stage_config = lower_available_upgrade(stage_name, brock_done)
+            log(stage_name .. " config is invalid; using "
+                .. table.concat(stage_config, ",") .. ".")
+        end
+    end
+
+    local mix = {}
+    local counts = {}
+    local fallback_counts = {}
+    for _, requested_key in ipairs(stage_config) do
+        local key = requested_key
+        if not recipe_unlocked(key, brock_done, syra_done) then
+            fallback_counts[key] = (fallback_counts[key] or 0) + 1
+            key = lower_available_food_for_request(key, brock_done)
+        end
+        counts[key] = (counts[key] or 0) + 1
+    end
+
+    for _, key in ipairs({ "syra", "brock", "meatbug" }) do
+        local count = fallback_counts[key] or 0
+        if count > 0 then
+            log(stage_name .. " requested " .. tostring(count) .. "x "
+                .. food_label(key) .. " but its quest is not completed; using "
+                .. food_label(lower_available_food_for_request(key, brock_done))
+                .. " instead.")
+        end
+    end
+
+    for _, key in ipairs({ "syra", "brock", "meatbug" }) do
+        append_reward(mix, key, counts[key] or 0)
+    end
+
+    if #mix == 0 then
+        return nil
+    end
+    return mix
+end
+
 local function pending_reward()
     if not pending_snaf_reward then return false end
     if os.clock() - pending_since > PENDING_SECONDS then
         pending_snaf_reward = false
-        pending_syra_unlocked = false
+        pending_reward_mix = nil
         return false
     end
     return true
 end
 
 local function arm_reward_swap()
+    if pending_reward() then return end
+
     pending_snaf_reward = true
-    pending_syra_unlocked = syra_quest_done()
+    pending_reward_mix = configured_reward_mix()
     pending_since = os.clock()
 end
 
 local function clear_reward_swap()
     pending_snaf_reward = false
-    pending_syra_unlocked = false
+    pending_reward_mix = nil
+end
+
+local function should_suppress_original_reward_hud()
+    if pending_reward() and pending_reward_mix ~= nil then return true end
+    return os.clock() < suppress_original_reward_hud_until
 end
 
 local function is_player_inventory(inventory)
@@ -270,13 +565,29 @@ local function delay_game_thread(ms, fn)
     return false
 end
 
-local function replace_hud_item_with_syra(item_param)
-    local syra_default = find_object(SYRA_STEW_DEFAULT)
-    if not is_valid(syra_default) then
-        log("Could not resolve " .. SYRA_STEW_DEFAULT)
-        return false
+local function add_reward_mix(inventory, total_count)
+    local remaining = tonumber(total_count) or 0
+    for _, reward in ipairs(pending_reward_mix or {}) do
+        if remaining <= 0 then return true end
+
+        local amount = reward.count
+        if amount > remaining then amount = remaining end
+
+        local item = find_object(reward.path)
+        if not is_valid(item) then
+            log("Could not resolve " .. reward.path)
+            return false
+        end
+
+        local added = safe("add " .. reward.key, function()
+            inventory:AddItemOfClass(item, amount)
+            return true
+        end) == true
+        if not added then return false end
+
+        remaining = remaining - amount
     end
-    return set_param(item_param, syra_default)
+    return remaining == 0
 end
 
 local function swap_player_inventory_reward(inventory_param, attempt)
@@ -286,9 +597,8 @@ local function swap_player_inventory_reward(inventory_param, attempt)
     if not is_valid(inventory) or not is_player_inventory(inventory) then return false end
 
     local ragout = find_object(MEATBUG_RAGOUT)
-    local syra = find_object(SYRA_STEW)
-    if not is_valid(ragout) or not is_valid(syra) then
-        log("Could not resolve item classes for inventory swap")
+    if not is_valid(ragout) then
+        log("Could not resolve original ragout class")
         return false
     end
 
@@ -299,17 +609,11 @@ local function swap_player_inventory_reward(inventory_param, attempt)
     local removed_count = tonumber(removed) or 0
 
     if removed_count > 0 then
-        suppress_next_syra_hud = suppress_next_syra_hud + 1
-        local added = safe("add Syra stew", function()
-            inventory:AddItemOfClass(syra, removed_count)
-            return true
-        end) == true
-        if not added and suppress_next_syra_hud > 0 then
-            suppress_next_syra_hud = suppress_next_syra_hud - 1
-        end
+        local added = add_reward_mix(inventory, removed_count)
         swapping_inventory = false
 
         if added then
+            suppress_original_reward_hud_until = os.clock() + 2
             clear_reward_swap()
             return true
         end
@@ -341,6 +645,8 @@ local function register_hook(path, handler)
     return true
 end
 
+load_config()
+
 register_hook("/Script/G1R.GameplayAbilityConversationV2WithUI:ServerRequestStartActingTopic",
     function(context, topic)
         if string.find(full_name(unwrap(topic)), SNAF_AFTERSUCCESS, 1, true) ~= nil then
@@ -350,22 +656,10 @@ register_hook("/Script/G1R.GameplayAbilityConversationV2WithUI:ServerRequestStar
 
 register_hook("/Script/G1R.InventoryComponent:OnItemAddedForHUD",
     function(_context, item, count)
-        if swapping_inventory
-            and suppress_next_syra_hud > 0
-            and param_count(count) == 3
-            and is_syra_stew(item) then
-            if set_param(count, 0) then
-                suppress_next_syra_hud = suppress_next_syra_hud - 1
-            end
-            return
-        end
-
-        if pending_reward()
+        if should_suppress_original_reward_hud()
             and param_count(count) == 3
             and is_meatbug_ragout(item) then
-            if pending_syra_unlocked then
-                replace_hud_item_with_syra(item)
-            end
+            set_param(count, 0)
         end
     end)
 
@@ -376,8 +670,7 @@ register_hook("/Script/G1R.InventoryComponent:MemorizeItem",
         if pending_reward()
             and param_count(count) == 3
             and is_meatbug_ragout(item) then
-            if pending_syra_unlocked then
-                replace_hud_item_with_syra(item)
+            if pending_reward_mix ~= nil then
                 swap_player_inventory_reward(context, 1)
             else
                 clear_reward_swap()

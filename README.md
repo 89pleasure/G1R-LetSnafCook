@@ -2,17 +2,40 @@
 
 Snaf finally steps up his cooking game.
 
-In the early game, Snaf's daily food reward is useful enough: 3x Meatbug Ragout whenever you ask him for something to eat. Later on, however, that reward becomes pretty underwhelming.
+In the early game, Snaf's daily food reward is useful enough: 3x Meatbug Ragout whenever you ask him for something to eat. As you help him recover better recipes, however, that reward should improve with him.
 
-This UE4SS Lua mod upgrades Snaf's daily reward after you complete his Syra recipe quest. Once the quest is finished, Snaf gives you 3x Syra's Stew instead of 3x Meatbug Ragout.
+This UE4SS Lua mod upgrades Snaf's daily reward as his recipe quests progress. After The Forgotten Recipe, Snaf gives you 3x Brock's Stew. After his Syra recipe quest, he upgrades again to 3x Syra's Stew.
 
 ## Features
 
-- Keeps Snaf's original daily Meatbug Ragout reward before the quest is completed
-- Upgrades the reward to 3x Syra's Stew after completing the Syra recipe quest
+- Keeps Snaf's original daily Meatbug Ragout reward before the recipe quests are completed
+- Upgrade 1: replaces the reward with 3x Brock's Stew after The Forgotten Recipe
+- Upgrade 2: replaces the reward with 3x Syra's Stew after completing the Syra recipe quest
+- Configurable upgraded reward mixes, such as 1x Syra's Stew and 2x Brock's Stew
 - Works with existing savegames
 - Lightweight UE4SS Lua mod
-- No new items, no balance overhaul, just a small reward progression fix
+- No new items, just a small configurable reward progression fix
+
+## Configuration
+
+Edit `LetSnafCook.ini` in the mod folder to change the upgraded rewards:
+
+```ini
+Upgrade1=meatbug,brock,brock
+Upgrade2=meatbug,brock,syra
+```
+
+`Upgrade1` is active after The Forgotten Recipe unlocks Brock's Stew. `Upgrade2` is active after Snaf's Syra recipe quest unlocks Syra's Stew. Each upgrade must contain exactly 3 portions.
+
+Allowed values:
+
+- `meatbug` or `meat`
+- `brock`
+- `syra`
+
+Commas and dots both work as separators, so `Upgrade2=brock,brock.syra` is treated like `Upgrade2=brock,brock,syra`.
+
+The mod still checks quest progress. If a configured portion is not unlocked, it falls back to the next lower available food: Syra -> Brock -> Meatbug Ragout. For example, `Upgrade2=brock,brock,syra` becomes `meatbug,meatbug,syra` if Syra is done but Brock is not. If an upgrade line is invalid, Snaf uses 3x the lower available food for that upgrade.
 
 ## Requirements
 
@@ -27,10 +50,11 @@ Copy `package/LetSnafCook` into your UE4SS `Mods` directory:
 G1R/Binaries/Win64/ue4ss/Mods/
 ```
 
-The final installed path should look like this:
+The final installed paths should look like this:
 
 ```text
 G1R/Binaries/Win64/ue4ss/Mods/LetSnafCook/Scripts/main.lua
+G1R/Binaries/Win64/ue4ss/Mods/LetSnafCook/LetSnafCook.ini
 ```
 
 ## Compatibility
@@ -46,6 +70,6 @@ Nexus image assets are stored in `assets/nexus`:
 
 ## Why?
 
-Because by the time you help Snaf improve his cooking, he should probably stop handing you the same old weak ragout.
+Because each time you help Snaf improve his cooking, he should probably stop handing you the same old weak ragout.
 
 Let Snaf cook.
