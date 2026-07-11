@@ -2,6 +2,8 @@ Let Snaf Cook
 
 Snaf's daily food reward now improves with his recipe quests.
 
+Requires PleasureLib installed next to LetSnafCook in the UE4SS Mods directory.
+
 Before the recipe quests, he keeps giving 3x Meatbug Ragout. After The
 Forgotten Recipe, the reward becomes 3x Brock's Stew. After the Syra recipe
 quest, it upgrades again to 3x Syra's Stew.

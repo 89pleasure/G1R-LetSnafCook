@@ -51,7 +51,12 @@ The mod still checks quest progress. If a configured portion is not unlocked, it
 
 - Gothic 1 Remake
 - UE4SS
+- PleasureLib
 - Optional: SharedModMenu for in-game configuration
+
+Install `PleasureLib` next to this mod in the game's UE4SS `Mods` directory.
+`Let Snaf Cook` can load it from the neighboring `PleasureLib` folder even when
+`mods.txt` does not define the load order.
 
 ## Installation
 
@@ -66,6 +71,7 @@ The final installed paths should look like this:
 ```text
 G1R/Binaries/Win64/ue4ss/Mods/LetSnafCook/Scripts/main.lua
 G1R/Binaries/Win64/ue4ss/Mods/LetSnafCook/Scripts/modmenu.lua
+G1R/Binaries/Win64/ue4ss/Mods/LetSnafCook/Scripts/pleasure_lib_loader.lua
 G1R/Binaries/Win64/ue4ss/Mods/LetSnafCook/LetSnafCook.ini
 ```
 
