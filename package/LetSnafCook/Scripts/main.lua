@@ -18,6 +18,19 @@ local FOOD_CODES = {
     brock = 2,
     syra = 3,
 }
+local FOOD_SETTING_VALUES = {
+    "Meatbug Ragout",
+    "Brock's Stew",
+    "Syra's Stew",
+}
+local FOOD_SETTING_VALUE_TRANSLATIONS = {
+    en = FOOD_SETTING_VALUES,
+    de = {
+        "Fleischwanzenragout",
+        "Brocks Eintopf",
+        "Syras Eintopf",
+    },
+}
 local DEFAULT_CONFIG = {
     Upgrade1 = { "brock", "brock", "brock" },
     Upgrade2 = { "syra", "syra", "syra" },
@@ -365,6 +378,74 @@ local function menu_set_food_code(stage_name, index, value)
     save_config()
 end
 
+local function native_setting_translations(stage_number, portion)
+    return {
+        en = {
+            name = "Upgrade " .. tostring(stage_number)
+                .. " - portion " .. tostring(portion),
+            description = "Selects the food for this reward portion. Locked recipes use the next lower available food.",
+        },
+        de = {
+            name = "Upgrade " .. tostring(stage_number)
+                .. " - Portion " .. tostring(portion),
+            description = "Waehlt das Essen fuer diese Belohnungsportion. Gesperrte Rezepte verwenden das naechstniedrigere verfuegbare Essen.",
+        },
+    }
+end
+
+local function set_native_food_code(stage_name, index, value)
+    local code = math.floor(tonumber(value) or 0) + 1
+    if code < 1 then code = 1 end
+    if code > #FOOD_KEYS then code = #FOOD_KEYS end
+
+    menu_upgrade(stage_name)[index] = FOOD_KEYS[code]
+    pleasureLib:log("Native settings set " .. stage_name
+        .. " portion " .. tostring(index)
+        .. " to " .. tostring(FOOD_KEYS[code]))
+    return save_config()
+end
+
+local function register_native_settings()
+    if type(pleasureLib.register_game_enum_setting) ~= "function" then
+        pleasureLib:log(
+            "PleasureLib 0.5.0 enum settings API unavailable")
+        return false
+    end
+
+    local stages = {
+        { name = "Upgrade1", number = 1 },
+        { name = "Upgrade2", number = 2 },
+    }
+    for _, stage in ipairs(stages) do
+        for portion = 1, 3 do
+            local stage_name = stage.name
+            local stage_number = stage.number
+            local portion_index = portion
+            pleasureLib:register_game_enum_setting({
+                id = "LetSnafCook." .. stage_name
+                    .. ".Portion" .. tostring(portion_index),
+                section = "Let Snaf Cook",
+                values = FOOD_SETTING_VALUES,
+                value_translations = FOOD_SETTING_VALUE_TRANSLATIONS,
+                widget = "spinner",
+                wrap_around = true,
+                default = (FOOD_CODES[
+                    DEFAULT_CONFIG[stage_name][portion_index]] or 1) - 1,
+                get = function()
+                    return menu_food_code(stage_name, portion_index) - 1
+                end,
+                set = function(value)
+                    return set_native_food_code(
+                        stage_name, portion_index, value)
+                end,
+                translations = native_setting_translations(
+                    stage_number, portion_index),
+            })
+        end
+    end
+    return true
+end
+
 local function reset_stage_config(stage_name)
     load_config()[stage_name] = copy_upgrade(DEFAULT_CONFIG[stage_name])
     save_config()
@@ -655,6 +736,7 @@ end
 
 load_config()
 register_shared_mod_menu()
+register_native_settings()
 
 pleasureLib:register_hook("/Script/G1R.GameplayAbilityConversationV2WithUI:ServerRequestStartActingTopic",
     function(context, topic)
